@@ -20,13 +20,14 @@ async def start_web_server():
     await site.start()
     print(f"Web server started on port {port}")
 
-# 2. キャラクターごとの代用データベース（完全一致のみ提案）
+# 2. キャラクターごとの代用データベース
 CHARACTER_SUBSTITUTES = {
     "パーシヴァル（リミテッド）": ["アッシュ", "ウィルナス", "水着ミリン"],
     "ゼタ（リミテッド）": ["ユエル", "クビラ", "スカーサハ"],
     "ミカエル（リミテッド）": ["アトゥム", "サテュロス", "火属性レ・フィーエ"],
     "ナタク（浴衣）": ["ネモネ", "水着クビラ", "エルモート"],
     "ウィルナス（リミテッド）": ["アシュラ", "スカーサハ", "ラインハルザ"],
+    "ワムデュス（クリスマス）": ["ガレヲン", "ビカラ", "ハロウィンフロレンス"], # 追加例
 }
 
 # 3. Discord Botの定義
@@ -46,7 +47,7 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """編成ページを解析し、分割送信＆厳密な代用アドバイスを表示するコマンド"""
+    """編成テーブルのみを精密解析し、正確な代用案を紐付けるコマンド"""
     await ctx.message.add_reaction("⏳")
 
     try:
@@ -65,7 +66,6 @@ async def parse(ctx, url: str):
 
         sections_info = []
 
-        # 除外する見出しキーワード
         exclude_heading_keywords = [
             "最強", "古戦場", "関連記事", "パーティ編成", "おすすめキャラ", 
             "マグナ", "アグニス", "シヴァ", "肉集め", "TOP", "まとめ"
@@ -83,29 +83,36 @@ async def parse(ctx, url: str):
             extras = []
             section_subs = []
 
+            # 見出しの直後にある「最初のテーブル（編成表）」を探す
+            target_table = None
             for sibling in heading.find_next_siblings():
                 if sibling.name in ['h2', 'h3']:
-                    break
-                
-                # 画像altからキャラクター抽出
-                for img in sibling.find_all('img'):
+                    break # 次の見出しにいったら終了
+                if sibling.name == 'table' or sibling.find('table'):
+                    target_table = sibling if sibling.name == 'table' else sibling.find('table')
+                    break # 最初の編成テーブルを取得
+
+            # 編成テーブルが見つかった場合、その内部のみからキャラ・要素を抽出
+            if target_table:
+                for img in target_table.find_all('img'):
                     alt = img.get('alt', '').strip()
                     skip_words = ["神ゲー", "logo", "icon", "banner", "閉じる", "arrow", "menu", "pt", "属性", "武器", "召喚石"]
                     if alt and not any(w.lower() in alt.lower() for w in skip_words):
-                        if alt not in chars and alt not in extras:
-                            if "ミニステル" in alt or "ウロボロス" in alt or "シークレット" in alt:
+                        if "ミニステル" in alt or "ウロボロス" in alt or "シークレット" in alt:
+                            if alt not in extras:
                                 extras.append(alt)
-                            else:
+                        else:
+                            if alt not in chars:
                                 chars.append(alt)
 
-                # テキスト（EXアビリティなど）の収集
-                for text_elem in sibling.find_all(['span', 'a', 'p', 'div']):
+                # テーブル内のテキスト要素（EXアビリティなど）
+                for text_elem in target_table.find_all(['td', 'th', 'a', 'span']):
                     txt = text_elem.get_text().strip()
                     if txt in ["ミゼラブルミスト", "クリアオール", "無明斬", "羅喉阿修羅陣", "薪割り", "薫風とさえずり", "ワイルドマギカ"]:
                         if txt not in chars and txt not in extras:
                             chars.append(txt)
 
-            # その編成に含まれるキャラに対してのみ代用案を生成（厳密化）
+            # 実際に編成テーブルから取得されたキャラのみを対象に代用案を作成
             for target_char in chars:
                 if target_char in CHARACTER_SUBSTITUTES:
                     subs_str = " / ".join(CHARACTER_SUBSTITUTES[target_char])
@@ -122,10 +129,9 @@ async def parse(ctx, url: str):
             await ctx.send("❌ 有効な編成セクションが見つかりませんでした。")
             return
 
-        # ヘッダーメッセージ
+        # 送信処理
         await ctx.send(f"✅ **全編成データの解析結果**\n📄 **ページ名**: `{page_title}`\n🔗 {clean_url}\n---")
 
-        # 2,000文字制限対策：メッセージを安全な長さ（約1,500文字単位）で分割送信
         current_chunk = ""
         for sec in sections_info:
             if len(current_chunk) + len(sec) + 2 > 1700:
