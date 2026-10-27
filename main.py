@@ -42,7 +42,6 @@ async def parse(ctx, url: str):
     await ctx.message.add_reaction("⏳")
 
     try:
-        # Discordの記号（< >）や前後の余分な空白を自動で取り除く
         clean_url = url.strip("<>").strip()
 
         headers = {
@@ -56,21 +55,41 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        await ctx.send(f"✅ **URLの読み込みに成功しました！**\n📄 ページタイトル: `{page_title}`\n🔗 対象URL: {clean_url}")
+        # GameWith編成ページ内のテキスト要素を取得（テスト用抽出）
+        # ページ内の主要なテキスト・画像リンク等を簡易スキャン
+        elements = soup.find_all(['td', 'th', 'div', 'img'])
+        
+        # alt属性（画像の説明文字＝キャラ名や武器名が入っていることが多い）を収集
+        names = []
+        for el in elements:
+            if el.name == 'img' and el.get('alt'):
+                alt_text = el.get('alt').strip()
+                if alt_text and alt_text not in names:
+                    names.append(alt_text)
+
+        # 抽出されたアイテム名の冒頭数件を表示
+        preview_list = "\n".join([f"・{name}" for name in names[:15]]) if names else "要素が見つかりませんでした"
+
+        message = (
+            f"✅ **URLの解析に成功しました！**\n"
+            f"📄 **編成名**: `{page_title}`\n\n"
+            f"🔍 **検出された主な要素（サンプル15件）**:\n"
+            f"{preview_list}\n\n"
+            f"🔗 {clean_url}"
+        )
+        await ctx.send(message)
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
-# 3. WebサーバーとDiscord Botを同時に起動するメイン処理
+
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         print("Error: DISCORD_TOKEN is not set.")
         return
 
-    # ダミーWebサーバーを起動してRenderのポート監視をパスする
     await start_web_server()
     
-    # Discord Botを起動
     async with bot:
         await bot.start(token)
 
