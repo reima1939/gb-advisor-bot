@@ -20,7 +20,7 @@ async def start_web_server():
     await site.start()
     print(f"Web server started on port {port}")
 
-# 2. キャラクターごとの代用データベース（個別紐付け用）
+# 2. キャラクターごとの代用データベース（完全一致のみ提案）
 CHARACTER_SUBSTITUTES = {
     "パーシヴァル（リミテッド）": ["アッシュ", "ウィルナス", "水着ミリン"],
     "ゼタ（リミテッド）": ["ユエル", "クビラ", "スカーサハ"],
@@ -46,7 +46,7 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """編成ページを解析し、ノイズを除外して編成ごとの詳細と個別代用案を表示するコマンド"""
+    """編成ページを解析し、分割送信＆厳密な代用アドバイスを表示するコマンド"""
     await ctx.message.add_reaction("⏳")
 
     try:
@@ -65,7 +65,7 @@ async def parse(ctx, url: str):
 
         sections_info = []
 
-        # 除外すべき見出しのキーワード（最強キャラ、古戦場、関連記事、メニューなどを弾く）
+        # 除外する見出しキーワード
         exclude_heading_keywords = [
             "最強", "古戦場", "関連記事", "パーティ編成", "おすすめキャラ", 
             "マグナ", "アグニス", "シヴァ", "肉集め", "TOP", "まとめ"
@@ -76,7 +76,6 @@ async def parse(ctx, url: str):
             if not heading_text or len(heading_text) > 40:
                 continue
             
-            # ノイズとなる見出しをスキップ
             if any(kw in heading_text for kw in exclude_heading_keywords):
                 continue
 
@@ -88,7 +87,7 @@ async def parse(ctx, url: str):
                 if sibling.name in ['h2', 'h3']:
                     break
                 
-                # 画像やテキスト要素から情報を広く収集
+                # 画像altからキャラクター抽出
                 for img in sibling.find_all('img'):
                     alt = img.get('alt', '').strip()
                     skip_words = ["神ゲー", "logo", "icon", "banner", "閉じる", "arrow", "menu", "pt", "属性", "武器", "召喚石"]
@@ -98,48 +97,48 @@ async def parse(ctx, url: str):
                                 extras.append(alt)
                             else:
                                 chars.append(alt)
-                                # この編成に含まれているキャラに対する代用案をチェック
-                                if alt in CHARACTER_SUBSTITUTES and alt not in section_subs:
-                                    section_subs.append((alt, CHARACTER_SUBSTITUTES[alt]))
 
-                # テキストベース（EXアビリティや細かいパーツ名など）も逃さず拾う
-                # ※HTMLの構造でテキストとして入っているアビリティ名などもここでキャッチ
+                # テキスト（EXアビリティなど）の収集
                 for text_elem in sibling.find_all(['span', 'a', 'p', 'div']):
                     txt = text_elem.get_text().strip()
-                    # アビリティや特定名称っぽいものを簡易判定して追加（長すぎる文章は弾く）
                     if txt in ["ミゼラブルミスト", "クリアオール", "無明斬", "羅喉阿修羅陣", "薪割り", "薫風とさえずり", "ワイルドマギカ"]:
                         if txt not in chars and txt not in extras:
                             chars.append(txt)
 
-            # 有効なパーティ情報がある場合のみ追加
+            # その編成に含まれるキャラに対してのみ代用案を生成（厳密化）
+            for target_char in chars:
+                if target_char in CHARACTER_SUBSTITUTES:
+                    subs_str = " / ".join(CHARACTER_SUBSTITUTES[target_char])
+                    section_subs.append(f"└ 💡 {target_char}の代用: {subs_str}")
+
             if chars:
-                main_str = " ".join([f"[{c}]" for c in chars[:8]]) # 少し長めの枠も対応
+                main_str = " ".join([f"[{c}]" for c in chars[:8]])
                 extra_str = f" | ﾏﾅﾍﾞﾘ/装備: " + ", ".join(extras) if extras else ""
-                
-                # この編成独自の代用案テキストを作成
-                sub_text_parts = []
-                if section_subs:
-                    for char_name, subs in section_subs:
-                        subs_str = " / ".join(subs)
-                        sub_text_parts.append(f"└ 💡 {char_name}の代用: {subs_str}")
-                
-                sub_advice_str = "\n" + "\n".join(sub_text_parts) if sub_text_parts else ""
+                sub_advice_str = "\n" + "\n".join(section_subs) if section_subs else ""
                 
                 sections_info.append(f"📌 **{heading_text}**\n 編成: {main_str}{extra_str}{sub_advice_str}")
 
-        preview_content = "\n\n".join(sections_info) if sections_info else "編成セクションが見つかりませんでした"
+        if not sections_info:
+            await ctx.send("❌ 有効な編成セクションが見つかりませんでした。")
+            return
 
-        message = (
-            f"✅ **編成データの解析＆個別代用アドバイス**\n"
-            f"📄 **ページ名**: `{page_title}`\n\n"
-            f"{preview_content}\n\n"
-            f"🔗 {clean_url}"
-        )
+        # ヘッダーメッセージ
+        await ctx.send(f"✅ **全編成データの解析結果**\n📄 **ページ名**: `{page_title}`\n🔗 {clean_url}\n---")
 
-        if len(message) > 1900:
-            await ctx.send(message[:1900] + "\n\n*(※文字数制限のため一部省略しました)*")
-        else:
-            await ctx.send(message)
+        # 2,000文字制限対策：メッセージを安全な長さ（約1,500文字単位）で分割送信
+        current_chunk = ""
+        for sec in sections_info:
+            if len(current_chunk) + len(sec) + 2 > 1700:
+                await ctx.send(current_chunk)
+                current_chunk = sec
+            else:
+                if current_chunk:
+                    current_chunk += "\n\n" + sec
+                else:
+                    current_chunk = sec
+        
+        if current_chunk:
+            await ctx.send(current_chunk)
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
