@@ -55,25 +55,31 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        # GameWith編成ページ内のテキスト要素を取得（テスト用抽出）
-        # ページ内の主要なテキスト・画像リンク等を簡易スキャン
-        elements = soup.find_all(['td', 'th', 'div', 'img'])
+        # 【改善版】編成グリッドやアイコンが含まれるエリアに絞り込んで要素を収集
+        # GameWithの編成ページ特有のクラスや構造をターゲットにする
+        items = []
         
-        # alt属性（画像の説明文字＝キャラ名や武器名が入っていることが多い）を収集
-        names = []
-        for el in elements:
-            if el.name == 'img' and el.get('alt'):
-                alt_text = el.get('alt').strip()
-                if alt_text and alt_text not in names:
-                    names.append(alt_text)
+        # 編成パーツの画像や名前が入りやすいエリア（例: builds や party に関連するブロック）を探索
+        # まずはページ内のすべての画像から、アイコンや装備らしいものを探す
+        for img in soup.find_all('img'):
+            alt_text = img.get('alt', '').strip()
+            # 広告やサイト共通メニュー、アイコンの共通ワードを除外するフィルタリング
+            exclude_words = [
+                "GameWith", "グラブル", "icon", "banner", "大バナー", 
+                "SSRキャラ評価", "攻略", "マルチバトル", "一覧", "TOP", "検索"
+            ]
+            
+            if alt_text and not any(word in alt_text for word in exclude_words):
+                if alt_text not in items:
+                    items.append(alt_text)
 
-        # 抽出されたアイテム名の冒頭数件を表示
-        preview_list = "\n".join([f"・{name}" for name in names[:15]]) if names else "要素が見つかりませんでした"
+        # 抽出された編成アイテムのリストを作成（最大20件）
+        preview_list = "\n".join([f"・{item}" for item in items[:20]]) if items else "編成アイテムが見つかりませんでした"
 
         message = (
-            f"✅ **URLの解析に成功しました！**\n"
+            f"✅ **編成データの抽出に成功しました！**\n"
             f"📄 **編成名**: `{page_title}`\n\n"
-            f"🔍 **検出された主な要素（サンプル15件）**:\n"
+            f"🎯 **検出された編成パーツ候補**:\n"
             f"{preview_list}\n\n"
             f"🔗 {clean_url}"
         )
@@ -81,7 +87,6 @@ async def parse(ctx, url: str):
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
-
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
