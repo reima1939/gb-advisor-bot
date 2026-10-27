@@ -55,14 +55,22 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        # GameWithの編成ページ内にある画像から、まずはすべてのalt属性を柔軟に収集
+        # 🧹 【お掃除処理】サイドバー、ヘッダー、広告、関連記事などの不要なエリアをごっそり削除する
+        for unwanted in soup(['header', 'footer', 'aside', 'nav', 'script', 'style']):
+            unwanted.decompose()
+        
+        # クラス名に side や ad, related が含まれる余分なブロックも削除
+        for div in soup.find_all(class_=lambda x: x and any(c in str(x).lower() for c in ['sidebar', 'ad', 'recommend', 'related', 'menu'])):
+            div.decompose()
+
+        # 残った「綺麗なメインエリア」の中から画像（alt属性）を収集
         items = []
         for img in soup.find_all('img'):
             alt_text = img.get('alt', '').strip()
             if not alt_text:
                 continue
 
-            # 明らかなサイト共通メニューや広告ワードのみピンポイントで除外
+            # サイト共通のロゴなどの最低限の除外ワード
             skip_keywords = ["GameWith", "banner", "大バナー", "icon", "App Store", "Google Play"]
             
             if not any(kw.lower() in alt_text.lower() for kw in skip_keywords):
@@ -70,12 +78,12 @@ async def parse(ctx, url: str):
                     items.append(alt_text)
 
         # 抽出されたアイテムリスト（最大20件）
-        preview_list = "\n".join([f"・{item}" for item in items[:20]]) if items else "有効なアイテムが見つかりませんでした"
+        preview_list = "\n".join([f"・{item}" for item in items[:20]]) if items else "編成アイテムが見つかりませんでした"
 
         message = (
             f"✅ **編成データの抽出に成功しました！**\n"
             f"📄 **編成名**: `{page_title}`\n\n"
-            f"🎯 **検出された候補（確認用）**:\n"
+            f"🎯 **検出された編成パーツ**:\n"
             f"{preview_list}\n\n"
             f"🔗 {clean_url}"
         )
