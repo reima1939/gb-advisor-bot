@@ -38,7 +38,7 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """GameWithなどの編成URLを解析してデータを抽出するコマンド"""
+    """神ゲー攻略などの編成URLを解析してパーティ種類とキャラを抽出するコマンド"""
     await ctx.message.add_reaction("⏳")
 
     try:
@@ -55,32 +55,42 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        # GameWithの編成ページから不要なワードを除外してパーツ候補を抽出
-        items = []
-        for img in soup.find_all('img'):
-            alt_text = img.get('alt', '').strip()
-            if not alt_text:
+        # 神ゲー攻略の構造に合わせて、見出し（h2, h3）と、そこに紐づくキャラクター要素を抽出
+        sections_info = []
+        
+        for heading in soup.find_all(['h2', 'h3']):
+            heading_text = heading.get_text().strip()
+            if not heading_text or len(heading_text) > 40:
                 continue
-
-            skip_keywords = [
-                "GameWith", "banner", "大バナー", "icon", "App Store", "Google Play",
-                "SSRキャラ評価", "攻略", "マルチバトル", "一覧", "TOP", "検索", "リリース", "キャンペーン"
-            ]
             
-            if not any(kw.lower() in alt_text.lower() for kw in skip_keywords):
-                if alt_text not in items:
-                    items.append(alt_text)
+            # 見出しの次にある要素からキャラ名やアイコンのaltを探索
+            chars = []
+            for sibling in heading.find_next_siblings():
+                if sibling.name in ['h2', 'h3']:
+                    break # 次の見出しに到達したら終了
+                
+                # 画像のalt属性からキャラクター名などを取得
+                for img in sibling.find_all('img'):
+                    alt = img.get('alt', '').strip()
+                    skip_words = ["神ゲー", "logo", "icon", "banner", "閉じる", "arrow", "menu"]
+                    if alt and not any(w.lower() in alt.lower() for w in skip_words):
+                        if alt not in chars:
+                            chars.append(alt)
 
-        preview_list = "\n".join([f"・{item}" for item in items[:15]]) if items else "編成アイテムが見つかりませんでした"
+            # 有効なキャラやパーツが見つかった見出しだけをリストに追加
+            if chars:
+                char_list_str = " ".join([f"[{c}]" for c in chars[:6]]) # 見やすく整形
+                sections_info.append(f"📌 **{heading_text}**\n キャラ等: {char_list_str}")
+
+        preview_content = "\n\n".join(sections_info[:4]) if sections_info else "編成セクションが見つかりませんでした"
 
         message = (
-            f"✅ **編成データの抽出テストに成功しました！**\n"
-            f"📄 **編成名**: `{page_title}`\n\n"
-            f"🎯 **検出されたパーツ候補**:\n"
-            f"{preview_list}\n\n"
+            f"✅ **編成データの解析に成功しました！**\n"
+            f"📄 **ページ名**: `{page_title}`\n\n"
+            f"{preview_content}\n\n"
             f"🔗 {clean_url}"
         )
-        await ctx.send(message)
+        await ctx.send(message[:2000]) # Discordの文字数制限対策
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
