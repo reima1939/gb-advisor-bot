@@ -20,28 +20,14 @@ async def start_web_server():
     await site.start()
     print(f"Web server started on port {port}")
 
-# 2. 主要キャラの代用データベース（火属性メイン）
+# 2. 代表的な主要キャラの代用データベース（全属性共通で拡張可能）
 SUBSTITUTE_DATABASE = {
-    "パーシヴァル（リミテッド）": [
-        "アッシュ (奥義・与ダメ補助)",
-        "ウィルナス (高火力アタッカー)",
-        "水着ミリン (奥義軸のゲージ/火力をカバー)"
-    ],
-    "ゼタ（リミテッド）": [
-        "ユエル (追撃・連続攻撃サポート)",
-        "クビラ (アビダメージ・高火力和枠)",
-        "スカーサハ (バリア・属性バフサポート)"
-    ],
-    "ミカエル（リミテッド）": [
-        "アトゥム (奥義・上限引き上げ補助)",
-        "サテュロス (防御・デバフ短縮・回復)",
-        "火属性レ・フィーエ (連撃・耐久サポート)"
-    ],
-    "ナタク（浴衣）": [
-        "ネモネ (奥義・アビ軸の耐久＆火力)",
-        "水着クビラ (アビ軸アタッカー)",
-        "エルモート (ディスペル・アビダメージ)"
-    ]
+    # 火属性
+    "パーシヴァル（リミテッド）": ["アッシュ", "ウィルナス", "水着ミリン"],
+    "ゼタ（リミテッド）": ["ユエル", "クビラ", "スカーサハ"],
+    "ミカエル（リミテッド）": ["アトゥム", "サテュロス", "火属性レ・フィーエ"],
+    "ナタク（浴衣）": ["ネモネ", "水着クビラ", "エルモート"],
+    # 他属性も今後ここに追加していくことで対応可能
 }
 
 # 3. Discord Botの定義（インテントの設定）
@@ -62,7 +48,7 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """神ゲー攻略などの編成URLを解析し、代用キャラ提案付きで表示するコマンド"""
+    """各種属性の編成URLを解析し、全編成と代用提案を表示するコマンド"""
     await ctx.message.add_reaction("⏳")
 
     try:
@@ -82,31 +68,43 @@ async def parse(ctx, url: str):
         sections_info = []
         detected_substitutes = {}
 
+        # ページ内のすべての見出し（h2, h3）を走査して全編成をピックアップ
         for heading in soup.find_all(['h2', 'h3']):
             heading_text = heading.get_text().strip()
-            if not heading_text or len(heading_text) > 40:
+            # 短すぎるものや無関係そうな長文見出しを除外
+            if not heading_text or len(heading_text) > 50 or "まとめ" in heading_text or "おすすめ" in heading_text:
                 continue
             
             chars = []
+            sub_chars = []
+            extras = []
+
             for sibling in heading.find_next_siblings():
                 if sibling.name in ['h2', 'h3']:
-                    break
+                    break # 次の見出しに到達したら終了
                 
+                # テキストや画像のalt属性からパーツを収集
                 for img in sibling.find_all('img'):
                     alt = img.get('alt', '').strip()
-                    skip_words = ["神ゲー", "logo", "icon", "banner", "閉じる", "arrow", "menu"]
+                    skip_words = ["神ゲー", "logo", "icon", "banner", "閉じる", "arrow", "menu", "pt", "属性"]
                     if alt and not any(w.lower() in alt.lower() for w in skip_words):
-                        if alt not in chars:
-                            chars.append(alt)
-                            # 代用データベースに一致するキャラがいるかチェック
-                            if alt in SUBSTITUTE_DATABASE and alt not in detected_substitutes:
-                                detected_substitutes[alt] = SUBSTITUTE_DATABASE[alt]
+                        if alt not in chars and alt not in sub_chars and alt not in extras:
+                            # ミニステルやアビリティ、武器などの特殊パーツの簡易判別
+                            if "ミニステル" in alt or "ウロボロス" in alt or "シークレット" in alt:
+                                extras.append(alt)
+                            else:
+                                chars.append(alt)
+                                if alt in SUBSTITUTE_DATABASE and alt not in detected_substitutes:
+                                    detected_substitutes[alt] = SUBSTITUTE_DATABASE[alt]
 
-            if chars:
-                char_list_str = " ".join([f"[{c}]" for c in chars[:6]])
-                sections_info.append(f"📌 **{heading_text}**\n 構成: {char_list_str}")
+            # 有効なパーツが検出されたセクションのみ追加
+            if chars or extras:
+                main_str = " ".join([f"[{c}]" for c in chars[:6]])
+                extra_str = f" | 装備/ﾏﾅﾍﾞﾘ: " + ", ".join(extras) if extras else ""
+                sections_info.append(f"📌 **{heading_text}**\n 編成: {main_str}{extra_str}")
 
-        preview_content = "\n\n".join(sections_info[:4]) if sections_info else "編成セクションが見つかりませんでした"
+        # 制限をなくし、検出されたすべての編成セクションをまとめる
+        preview_content = "\n\n".join(sections_info) if sections_info else "編成セクションが見つかりませんでした"
 
         # 代用案のテキストを生成
         substitute_text = ""
@@ -118,13 +116,18 @@ async def parse(ctx, url: str):
             substitute_text = "\n\n💡 **おすすめ代用キャラクター案**:\n" + "\n".join(sub_lines)
 
         message = (
-            f"✅ **編成データの解析＆アドバイス**\n"
+            f"✅ **全編成データの解析＆アドバイス**\n"
             f"📄 **ページ名**: `{page_title}`\n\n"
             f"{preview_content}"
             f"{substitute_text}\n\n"
             f"🔗 {clean_url}"
         )
-        await ctx.send(message[:2000])
+
+        # Discordのメッセージ長制限（2000文字）を超える場合の分割送信処理
+        if len(message) > 1900:
+            await ctx.send(message[:1900] + "\n\n*(※文字数制限のため一部省略しました)*")
+        else:
+            await ctx.send(message)
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
