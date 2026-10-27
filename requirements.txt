@@ -1,3 +1,5 @@
 discord.py==2.3.2
 opencv-python-headless
 audioop-lts
+beautifulsoup4==4.12.3
+requests==2.31.0
