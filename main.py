@@ -37,8 +37,60 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """シンプルなテスト用コマンド（2重送信チェック用）"""
-    await ctx.send(f"✅ 受付しました: {url}")
+    """GameWithなどの編成URLを解析してデータを抽出するコマンド"""
+    await ctx.message.add_reaction("⏳")
+
+    try:
+        clean_url = url.strip("<>").strip()
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(clean_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            await ctx.send(f"❌ ページの取得に失敗しました（ステータスコード: {response.status_code}）")
+            return
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
+
+        # GameWithの編成ページ特有の「編成データが載っているエリア（例: buildsやparty関連のブロック）」を探索
+        # まずはページ内の武器やキャラの画像・要素を安全に絞り込むため、特定のエリアを探します
+        items = []
+        
+        # 編成パーツ画像やテキストが入りやすいテーブルや特定のコンテナをターゲットにする
+        # ここでは「編成」や「装備」に関連する名前やalt属性を持つ要素を確実にキャッチします
+        for img in soup.find_all('img'):
+            alt_text = img.get('alt', '').strip()
+            if not alt_text:
+                continue
+
+            # 広告やサイトメニュー、明らかに無関係なものを完全に弾く
+            skip_keywords = [
+                "GameWith", "banner", "大バナー", "icon", "App Store", "Google Play",
+                "SSRキャラ評価", "攻略", "マルチバトル", "一覧", "TOP", "検索", "リリース", "キャンペーン"
+            ]
+            
+            # 除外ワードが含まれておらず、かつ名前っぽいもの
+            if not any(kw.lower() in alt_text.lower() for kw in skip_keywords):
+                # グラブルの武器名・キャラ名にありがちなキーワードが含まれるか、あるいは純粋なパーツ候補として追加
+                if alt_text not in items:
+                    items.append(alt_text)
+
+        # 抽出されたアイテムリスト（最大15件）
+        preview_list = "\n".join([f"・{item}" for item in items[:15]]) if items else "編成アイテムが見つかりませんでした"
+
+        message = (
+            f"✅ **編成データの抽出テストに成功しました！**\n"
+            f"📄 **編成名**: `{page_title}`\n\n"
+            f"🎯 **検出されたパーツ候補**:\n"
+            f"{preview_list}\n\n"
+            f"🔗 {clean_url}"
+        )
+        await ctx.send(message)
+
+    except Exception as e:
+        await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
 
 # 3. メインの起動処理（WebサーバーとBotを安全に同時起動）
 async def main():
