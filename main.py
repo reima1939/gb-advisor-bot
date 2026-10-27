@@ -42,10 +42,13 @@ async def parse(ctx, url: str):
     await ctx.message.add_reaction("⏳")
 
     try:
+        # Discordの記号（< >）や前後の余分な空白を自動で取り除く
+        clean_url = url.strip("<>").strip()
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(clean_url, headers=headers, timeout=10)
         if response.status_code != 200:
             await ctx.send(f"❌ ページの取得に失敗しました（ステータスコード: {response.status_code}）")
             return
@@ -53,11 +56,10 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        await ctx.send(f"✅ **URLの読み込みに成功しました！**\n📄 ページタイトル: `{page_title}`\n🔗 対象URL: {url}")
+        await ctx.send(f"✅ **URLの読み込みに成功しました！**\n📄 ページタイトル: `{page_title}`\n🔗 対象URL: {clean_url}")
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
-
 # 3. WebサーバーとDiscord Botを同時に起動するメイン処理
 async def main():
     token = os.getenv("DISCORD_TOKEN")
