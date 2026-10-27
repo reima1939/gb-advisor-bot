@@ -55,25 +55,28 @@ async def parse(ctx, url: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
 
-        # 【改善版】編成グリッドやアイコンが含まれるエリアに絞り込んで要素を収集
-        # GameWithの編成ページ特有のクラスや構造をターゲットにする
+        # 【超強力フィルタ版】記事内の画像から、広告やメニューを除外し、キャラ・武器・石候補だけを絞り込む
         items = []
         
-        # 編成パーツの画像や名前が入りやすいエリア（例: builds や party に関連するブロック）を探索
-        # まずはページ内のすべての画像から、アイコンや装備らしいものを探す
+        # ページ全体の画像をチェック
         for img in soup.find_all('img'):
             alt_text = img.get('alt', '').strip()
-            # 広告やサイト共通メニュー、アイコンの共通ワードを除外するフィルタリング
+            if not alt_text:
+                continue
+
+            # 除外したいキーワード（サイト共通メニュー、広告、ニュース、バナーなど）
             exclude_words = [
                 "GameWith", "グラブル", "icon", "banner", "大バナー", 
-                "SSRキャラ評価", "攻略", "マルチバトル", "一覧", "TOP", "検索"
+                "SSRキャラ評価", "攻略", "マルチバトル", "一覧", "TOP", "検索",
+                "リリース", "キャンペーン", "事前登録", "App Store", "Google Play", "hulu", "DMM"
             ]
             
-            if alt_text and not any(word in alt_text for word in exclude_words):
+            # 除外ワードが含まれておらず、かつ「長すぎる説明文（広告のキャッチコピーなど）」ではないもの（例: 30文字以下）
+            if not any(word in alt_text for word in exclude_words) and len(alt_text) <= 30:
                 if alt_text not in items:
                     items.append(alt_text)
 
-        # 抽出された編成アイテムのリストを作成（最大20件）
+        # 抽出されたアイテムのリスト（最大20件）
         preview_list = "\n".join([f"・{item}" for item in items[:20]]) if items else "編成アイテムが見つかりませんでした"
 
         message = (
@@ -87,6 +90,7 @@ async def parse(ctx, url: str):
 
     except Exception as e:
         await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
+        
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
