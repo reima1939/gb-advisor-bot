@@ -3,10 +3,8 @@ import asyncio
 from aiohttp import web
 import discord
 from discord.ext import commands
-from bs4 import BeautifulSoup
-import requests
 
-# 1. Renderのポート要件を満たすためのダミーWebサーバー（無料枠用）
+# 1. Renderのポート要件を満たすための軽量Webサーバー
 async def handle(request):
     return web.Response(text="GranblueAdvisor Bot is running!")
 
@@ -20,7 +18,7 @@ async def start_web_server():
     await site.start()
     print(f"Web server started on port {port}")
 
-# 2. Discord Botの設定
+# 2. Discord Botの定義（インテントの設定）
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -28,6 +26,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
+    # このログがRenderのログに「1回だけ」表示されているかも重要な確認ポイントです
     print(f"Logged in as {bot.user.name} ({bot.user.id})")
     print("GranblueAdvisor Bot is now online!")
 
@@ -38,68 +37,20 @@ async def ping(ctx):
 
 @bot.command()
 async def parse(ctx, url: str):
-    """GameWithなどの編成URLを解析してデータを抽出するコマンド"""
-    await ctx.message.add_reaction("⏳")
+    """シンプルなテスト用コマンド（2重送信チェック用）"""
+    await ctx.send(f"✅ 受付しました: {url}")
 
-    try:
-        clean_url = url.strip("<>").strip()
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        response = requests.get(clean_url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            await ctx.send(f"❌ ページの取得に失敗しました（ステータスコード: {response.status_code}）")
-            return
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        page_title = soup.find('title').get_text() if soup.find('title') else "タイトルなし"
-
-        # 🧹 【お掃除処理】サイドバー、ヘッダー、広告、関連記事などの不要なエリアをごっそり削除する
-        for unwanted in soup(['header', 'footer', 'aside', 'nav', 'script', 'style']):
-            unwanted.decompose()
-        
-        # クラス名に side や ad, related が含まれる余分なブロックも削除
-        for div in soup.find_all(class_=lambda x: x and any(c in str(x).lower() for c in ['sidebar', 'ad', 'recommend', 'related', 'menu'])):
-            div.decompose()
-
-        # 残った「綺麗なメインエリア」の中から画像（alt属性）を収集
-        items = []
-        for img in soup.find_all('img'):
-            alt_text = img.get('alt', '').strip()
-            if not alt_text:
-                continue
-
-            # サイト共通のロゴなどの最低限の除外ワード
-            skip_keywords = ["GameWith", "banner", "大バナー", "icon", "App Store", "Google Play"]
-            
-            if not any(kw.lower() in alt_text.lower() for kw in skip_keywords):
-                if alt_text not in items:
-                    items.append(alt_text)
-
-        # 抽出されたアイテムリスト（最大20件）
-        preview_list = "\n".join([f"・{item}" for item in items[:20]]) if items else "編成アイテムが見つかりませんでした"
-
-        message = (
-            f"✅ **編成データの抽出に成功しました！**\n"
-            f"📄 **編成名**: `{page_title}`\n\n"
-            f"🎯 **検出された編成パーツ**:\n"
-            f"{preview_list}\n\n"
-            f"🔗 {clean_url}"
-        )
-        await ctx.send(message)
-
-    except Exception as e:
-        await ctx.send(f"❌ エラーが発生しました: `{str(e)}`")
-        
+# 3. メインの起動処理（WebサーバーとBotを安全に同時起動）
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         print("Error: DISCORD_TOKEN is not set.")
         return
 
+    # Webサーバー起動
     await start_web_server()
-    
+
+    # Discord Bot起動（startを使うことで二重接続を防ぐ）
     async with bot:
         await bot.start(token)
 
